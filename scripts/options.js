@@ -32,10 +32,10 @@ function saveOptions() {
 	document.getElementById('raining').disabled = music == 'animal-crossing';
 
 	let enabledKKVersion = !(document.getElementById('always-kk').checked || document.getElementById('enable-kk').checked);
-	document.getElementById('kk-version-live').disabled = enabledKKVersion;
-	document.getElementById('kk-version-aircheck').disabled = enabledKKVersion;
-	document.getElementById('kk-version-both').disabled = enabledKKVersion;
 
+	document.getElementById('music-selection').querySelectorAll('input').forEach(updateChildrenState.bind(null, alwaysKK));
+	document.getElementById('kk-version-selection').querySelectorAll('input').forEach(updateChildrenState.bind(null, enabledKKVersion));
+	
 	chrome.storage.sync.set({
 		volume,
 		music,
@@ -51,6 +51,9 @@ function saveOptions() {
 	});
 }
 
+function updateChildrenState(disabled, childElement){		
+	childElement.disabled = disabled
+}
 function restoreOptions() {
 	chrome.storage.sync.get({
 		volume: 0.5,
@@ -82,9 +85,8 @@ function restoreOptions() {
 		document.getElementById('raining').disabled = items.music == 'animal-crossing';
 
 		let enabledKKVersion = !(document.getElementById('always-kk').checked || document.getElementById('enable-kk').checked);
-		document.getElementById('kk-version-live').disabled = enabledKKVersion;
-		document.getElementById('kk-version-aircheck').disabled = enabledKKVersion;
-		document.getElementById('kk-version-both').disabled = enabledKKVersion;
+		document.getElementById('kk-version-selection').querySelectorAll('input').forEach(updateChildrenState.bind(null, enabledKKVersion));
+		document.getElementById('music-selection').querySelectorAll('input').forEach(updateChildrenState.bind(null, items.alwaysKK));
 	});
 }
 
