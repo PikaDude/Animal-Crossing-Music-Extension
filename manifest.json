@@ -5,7 +5,6 @@
          "scripts/tune_player.js", 
          "scripts/TownTuneManager.js", 
          "scripts/TimeKeeper.js", 
-         "scripts/LoopTimes.js", 
          "scripts/WeatherManager.js", 
          "scripts/KKSongs.js",
          "scripts/AudioManager.js", 
