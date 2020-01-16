@@ -55,27 +55,6 @@ function AudioManager(addEventListener, isTownTune) {
 		// SETTING AUDIO SOURCE		
 		audio.src = `https://ac.pikadude.me/${game}/${weather}/${songName}.ogg`;
 
-		let loopTime = (loopTimes[game] || {})[hour];
-		// set up loop points if loopTime is set up for this
-		// game and hour
-		if (loopTime) {
-			let delayToLoop = loopTime.end;
-			if (skipIntro) {
-				audio.currentTime = loopTime.start;
-				delayToLoop -= loopTime.start;
-			}
-			audio.onplay = function () {
-				let loopTimeout = setTimeout(() => {
-					printDebug("looping");
-					playHourSong(game, weather, hour, true);
-				}, delayToLoop * 1000);
-				killLoopTimeout = function () {
-					clearTimeout(loopTimeout);
-					loopTimeout = null;
-				};
-			}
-		}
-
 		// If the music is paused via pressing the "close" button in the media session dialogue,
 		// then we gracefully handle it rather than going into an invalid state.
 		audio.onpause = function () {
