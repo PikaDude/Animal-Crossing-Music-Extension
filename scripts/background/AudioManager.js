@@ -10,6 +10,10 @@ function AudioManager(addEventListener, isTownTune) {
 	// Should also be used for disabling event music for those who have turned them off in the settings, then this  should be false.
 	let eventsEnabled = false;
 
+	// If enabled, after 3 seconds, the song will skim to three seconds before
+	// the end of the loop time, to easily and quickly test loops.
+	let debugLoopTimes = false;
+
 	let audio = document.createElement('audio');
 	let killLoopTimeout;
 	let killFadeInterval;
@@ -17,7 +21,13 @@ function AudioManager(addEventListener, isTownTune) {
 	let timeKeeper = new TimeKeeper();
 	let mediaSessionManager = new MediaSessionManager();
 	let kkVersion;
+	let hourlyChange = false;
 
+	let setVolumeValue;
+	let tabAudible = false;
+	let reduceVolumeValue = 0;
+	let reducedVolume = false;
+	let tabAudioPaused = false;
 
 	// isHourChange is true if it's an actual hour change,
 	// false if we're activating music in the middle of an hour
@@ -55,35 +65,67 @@ function AudioManager(addEventListener, isTownTune) {
 		// SETTING AUDIO SOURCE		
 		audio.src = `https://ac.pikadude.me/static/${game}/${weather}/${songName}.ogg`;
 
-		let loopTime = (loopTimes[game] || {})[hour];
-		// set up loop points if loopTime is set up for this
-		// game and hour
+		let loopTime = ((loopTimes[game] || {})[weather] || {})[hour];
+		let delayToLoop;
+		let started = false;
+
 		if (loopTime) {
-			let delayToLoop = loopTime.end;
+			delayToLoop = loopTime.end;
+
 			if (skipIntro) {
 				audio.currentTime = loopTime.start;
 				delayToLoop -= loopTime.start;
 			}
-			audio.onplay = function () {
+		}
+
+		audio.onpause = onPause;
+
+		audio.onplay = () => {
+			// If we resume mid-song, then we recalculate the delayToLoop
+			if (started && loopTime) {
+				delayToLoop = loopTime.end;
+				delayToLoop -= audio.currentTime;
+
+				setLoopTimes();
+			}
+		};
+
+		audio.play().then(setLoopTimes);
+
+		function setLoopTimes() {
+			// song has started
+			started = true;
+
+			// set up loop points if loopTime is set up for this
+			// game, hour and weather.
+			if (loopTime) {
+				printDebug("setting loop times");
+
+				if (debugLoopTimes) {
+					delayToLoop = 8;
+					setTimeout(() => {
+						printDebug("skimming");
+						audio.currentTime = loopTime.end - 5;
+					}, 3000);
+				}
+
+				printDebug("delayToLoop: " + delayToLoop);
+
 				let loopTimeout = setTimeout(() => {
 					printDebug("looping");
-					playHourSong(game, weather, hour, true);
+					audio.currentTime = loopTime.start;
+
+					delayToLoop = loopTime.end - loopTime.start;
+					setLoopTimes();
 				}, delayToLoop * 1000);
-				killLoopTimeout = function () {
+				killLoopTimeout = () => {
+					printDebug("killing loop timeout");
 					clearTimeout(loopTimeout);
 					loopTimeout = null;
 				};
-			}
+			} else printDebug("no loop times found. looping full song")
 		}
 
-		// If the music is paused via pressing the "close" button in the media session dialogue,
-		// then we gracefully handle it rather than going into an invalid state.
-		audio.onpause = function () {
-			window.notify("pause");
-			chrome.storage.sync.set({ paused: true });
-		}
-
-		audio.play();
 		mediaSessionManager.updateMetadata(game, hour, weather);
 	}
 
@@ -91,7 +133,8 @@ function AudioManager(addEventListener, isTownTune) {
 		kkVersion = _kkVersion;
 		clearLoop();
 		audio.loop = false;
-		audio.onplay = null
+		audio.onplay = null;
+		audio.onpause = onPause;
 		audio.addEventListener("ended", playKKSong);
 		fadeOutAudio(500, playKKSong);
 
@@ -99,19 +142,19 @@ function AudioManager(addEventListener, isTownTune) {
 	}
 
 	function playKKSong() {
+		audio.onpause = null;
+
 		let version;
 		if (kkVersion == 'both') {
 			if (Math.floor(Math.random() * 2) == 0) version = 'live';
 			else version = 'aircheck';
 		} else version = kkVersion;
 
-		let randomSong;
-		if (version == 'live') randomSong = liveKKSongList[Math.floor(Math.random() * liveKKSongList.length)];
-		else if (version == 'aircheck') randomSong = aircheckKKSongList[Math.floor(Math.random() * aircheckKKSongList.length)];
+		let randomSong = KKSongList[Math.floor(Math.random() * KKSongList.length)];
 		audio.src = `https://ac.pikadude.me/static/kk/${version}/${randomSong}.ogg`;
 		audio.play();
 
-		let formattedTitle = `${randomSong.split(' - ')[1]} (${version.charAt(0).toUpperCase() + version.slice(1)} Version)`;
+		let formattedTitle = `${randomSong.split(' - ')[1]} (${capitalize(version)} Version)`;
 		window.notify("kkMusic", [formattedTitle]);
 
 		mediaSessionManager.updateMetadataKK(formattedTitle, randomSong);
@@ -136,6 +179,7 @@ function AudioManager(addEventListener, isTownTune) {
 					audio.volume -= step;
 				} else {
 					clearInterval(fadeInterval);
+					hourlyChange = true;
 					audio.pause();
 					audio.volume = oldVolume;
 					if (callback) callback();
@@ -147,6 +191,27 @@ function AudioManager(addEventListener, isTownTune) {
 				killFadeInterval = null;
 			}
 		}
+	}
+
+	// If the music is paused via pressing the "close" button in the media session dialogue,
+	// then we gracefully handle it rather than going into an invalid state.
+	function onPause() {
+		if (hourlyChange) hourlyChange = false;
+		else {
+			window.notify("pause", [tabAudioPaused]);
+			if (killLoopTimeout) killLoopTimeout();
+			if (!tabAudioPaused) chrome.storage.sync.set({ paused: true });
+		}
+	}
+
+	function setVolume() {
+		let newVolume = setVolumeValue;
+		if (reducedVolume) newVolume = newVolume * (1 - reduceVolumeValue / 100);
+
+		if (newVolume < 0) newVolume = 0;
+		if (newVolume > 1) newVolume = 1;
+
+		audio.volume = newVolume;
 	}
 
 	addEventListener("hourMusic", playHourlyMusic);
@@ -163,7 +228,58 @@ function AudioManager(addEventListener, isTownTune) {
 	});
 
 	addEventListener("volume", newVol => {
-		audio.volume = newVol;
+		setVolumeValue = newVol;
+		setVolume();
+	});
+
+	// If a tab starts or stops playing audio
+	addEventListener("tabAudio", (audible, tabAudio, reduceValue) => {
+		if (audible != null) {
+			tabAudible = audible;
+
+			// Handles all cases except for an options switch.
+			if (tabAudio == 'pause') {
+				if (audible) {
+					if (!audio.paused) {
+						audio.pause();
+						tabAudioPaused = true;
+					}
+				} else {
+					if (audio.paused && audio.readyState >= 3) {
+						audio.play();
+						tabAudioPaused = false;
+						// Get the badge icon updated.
+						window.notify("unpause");
+					}
+				}
+			}
+
+			if (tabAudio == 'reduce') {
+				if (audible) {
+					reduceVolumeValue = reduceValue;
+					reducedVolume = true;
+					setVolume();
+				} else {
+					reducedVolume = false;
+					setVolume();
+				}
+			}
+		} else if (tabAudible) {
+			// Handles when the options are switched. Disables the previous option and enables the new one.
+			// Only runs when tab is audible.
+
+			if (audio.paused && tabAudio != 'pause') {
+				audio.play();
+				tabAudioPaused = false;
+				window.notify("unpause");
+				window.notify("tabAudio", [true, tabAudio, reduceValue]);
+			} else if (reducedVolume && tabAudio != 'reduce') {
+				reducedVolume = false;
+				setVolume();
+				window.notify("tabAudio", [true, tabAudio, reduceValue]);
+			} else if (tabAudio == 'pause' && audio.pause && !tabAudioPaused) window.notify("tabAudio", [true, tabAudio, reduceValue]);
+			else if (!reducedVolume && tabAudio == 'reduce') window.notify("tabAudio", [true, tabAudio, reduceValue]);
+		}
 	});
 
 }

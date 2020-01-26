@@ -11,6 +11,9 @@ function StateManager() {
 	let callbacks = {};
 
 	let timeKeeper = new TimeKeeper();
+	let tabAudio = new TabAudioHandler();
+	let townTuneManager = new TownTuneManager();
+	let badgeManager;
 	let weatherManager;
 	let isKKTime;
 	let startup = true;
@@ -27,6 +30,8 @@ function StateManager() {
 	this.activate = function () {
 		isKKTime = timeKeeper.getDay() == 6 && timeKeeper.getHour() >= 20;
 		getSyncedOptions(() => {
+			badgeManager = new BadgeManager(this.registerCallback, options.enableBadgeText);
+
 			if (!weatherManager) {
 				weatherManager = new WeatherManager(options.zipCode, options.countryCode);
 				weatherManager.registerChangeCallback(() => {
@@ -46,14 +51,15 @@ function StateManager() {
 			if (isKK()) notifyListeners("kkStart", [options.kkVersion]);
 			else {
 				let musicAndWeather = getMusicAndWeather();
-				if (!musicAndWeather.weather) return;
-				notifyListeners("hourMusic", [timeKeeper.getHour(), musicAndWeather.weather, musicAndWeather.music, false]);
+				if (musicAndWeather.weather) notifyListeners("hourMusic", [timeKeeper.getHour(), musicAndWeather.weather, musicAndWeather.music, false]);
 			}
+
+			tabAudio.activate();
 		});
 	};
 
 	// Possible events include:
-	// volume, kkStart, hourMusic, gameChange, weatherChange, pause
+	// volume, kkStart, hourMusic, gameChange, weatherChange, pause, tabAudio
 	function notifyListeners(event, args) {
 		if (!options.paused || event === "pause") {
 			var callbackArr = callbacks[event] || [];
@@ -72,7 +78,8 @@ function StateManager() {
 		return options.weather == 'live';
 	}
 
-	// retrieve saved options
+	// Retrieves all synced options, which are then stored in the 'options' variable
+	// Default values to use if absent are specified
 	function getSyncedOptions(callback) {
 		chrome.storage.sync.get({
 			volume: 0.5,
@@ -84,10 +91,13 @@ function StateManager() {
 			kkVersion: 'live',
 			paused: false,
 			enableTownTune: true,
+			absoluteTownTune: false,
 			//enableAutoPause: false,
 			zipCode: "98052",
 			countryCode: "us",
-			enableBadgeText: true
+			enableBadgeText: true,
+			tabAudio: 'nothing',
+			tabAudioReduceValue: 80
 		}, items => {
 			options = items;
 			if (typeof callback === 'function') callback();
@@ -143,35 +153,50 @@ function StateManager() {
 		else if (!isKK()) {
 			let musicAndWeather = getMusicAndWeather();
 			notifyListeners("hourMusic", [hour, musicAndWeather.weather, musicAndWeather.music, true]);
+
+			if (options.paused && options.absoluteTownTune) townTuneManager.playTune();
 		}
 	});
 
-	// Update our options object if stored options changes, and notify listeners
-	// of any pertinent changes.
+	// 'Updated options' listener callback
+	// Detects that the user has updated an option
+	// Updates the 'options' variable and notifies listeners of any pertinent changes
 	chrome.storage.onChanged.addListener(changes => {
+		printDebug('A data object has been updated: ', changes)
 		let wasKK = isKK();
 		let kkVersion = options.kkVersion;
-		let oldMusicAndWeather = getMusicAndWeather();
+		let oldTabAudio = this.getOption("tabAudio");
+		let oldTabAudioReduce = this.getOption("tabAudioReduceValue");
+		// Trigger 'options' variable update
 		getSyncedOptions(() => {
-			if (typeof changes.zipCode !== 'undefined') weatherManager.setZip(options.zipCode);
-			if (typeof changes.countryCode !== 'undefined') weatherManager.setCountry(options.countryCode);
-			if (typeof changes.volume !== 'undefined') notifyListeners("volume", [options.volume]);
-			if ((typeof changes.music !== 'undefined' || typeof changes.weather) && !isKK()) {
+			// Detect changes and notify corresponding listeners
+			if ('zipCode' in changes) weatherManager.setZip(changes.zipCode.newValue);
+			if ('countryCode' in changes) weatherManager.setCountry(changes.countryCode.newValue);
+			if ('volume' in changes) notifyListeners("volume", [changes.volume.newValue]);
+			if (('music' in changes || 'weather' in changes) && !isKK()) {
 				let musicAndWeather = getMusicAndWeather();
-				if (musicAndWeather.music != oldMusicAndWeather.music || musicAndWeather.weather != oldMusicAndWeather.weather)
-					notifyListeners("gameChange", [timeKeeper.getHour(), musicAndWeather.weather, musicAndWeather.music]);
+				notifyListeners("gameChange", [timeKeeper.getHour(), musicAndWeather.weather, musicAndWeather.music]);
 			}
-
 			if ((isKK() && !wasKK) || (kkVersion != options.kkVersion && isKK())) notifyListeners("kkStart", [options.kkVersion]);
 			if (!isKK() && wasKK) {
 				let musicAndWeather = getMusicAndWeather();
 				notifyListeners("hourMusic", [timeKeeper.getHour(), musicAndWeather.weather, musicAndWeather.music, false]);
 			}
+			if (oldTabAudio != options.tabAudio || oldTabAudioReduce != options.tabAudioReduceValue) notifyListeners("tabAudio", [null, options.tabAudio, options.tabAudioReduceValue]);
+			badgeManager.updateEnabled(options.enableBadgeText);
 		});
 	});
 
 	// play/pause when user clicks the extension icon
 	chrome.browserAction.onClicked.addListener(toggleMusic);
+
+	// update tab audio handler when the user changes the extension's permissions
+	chrome.permissions.onAdded.addListener(tabAudio.activate);
+	chrome.permissions.onRemoved.addListener(tabAudio.activate);
+
+	tabAudio.registerCallback(audible => {
+		notifyListeners("tabAudio", [audible, options.tabAudio, options.tabAudioReduceValue]);
+	});
 
 	// Handle the user interactions in the media session dialogue.
 	navigator.mediaSession.setActionHandler('play', toggleMusic);
