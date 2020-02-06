@@ -1,7 +1,8 @@
+# This was the continuation of the original [Animal Crossing Music](https://github.com/animal-crossing-music-extension/ac-music-extension) project. Development has resumed back on the original repository, and this repository has been archived.
+
 ![Project Banner](docs/banner.png)
 
 # Animal Crossing Music 🍀
-#### This is continuation of the original [Animal Crossing Music](https://github.com/animal-crossing-music-extension/Animal-Crossing-Music-Extension) project, which is no longer maintained.
  
 **Animal Crossing Music** is a a fun Chrome extension for playing Animal Crossing's
 music in the browser, while you work, play or browse the web! ✨
